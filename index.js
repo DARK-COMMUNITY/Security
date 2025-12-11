@@ -5,96 +5,139 @@ const app = express();
 
 app.use(express.json());
 
-// Tokens privados en Railway (NO en el código)
+// Variables
 const TOKEN = process.env.PUBLIC_TOKEN;
-const WEBHOOK_MAIN = process.env.WEBHOOK_MAIN;
-const WEBHOOK_ATTACK = process.env.WEBHOOK_ATTACK;
+const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const MAIN_CHANNEL_ID = process.env.MAIN_CHANNEL_ID;
 
-function logToFile(req, status) {
-    const log = `
-============================
-📅 Fecha: ${new Date().toISOString()}
-🌐 IP: ${req.ip}
-🔎 Status: ${status}
-🧾 User-Agent: ${req.headers["user-agent"]}
-📦 Body: ${JSON.stringify(req.body, null, 2)}
-============================\n`;
+// Rango de IPs de Roblox
+const allowedRoblox = [
+    /^128\.116\./,
+    /^20\./,
+    /^40\./,
+    /^52\./
+];
 
-    fs.appendFileSync("./logs.txt", log);
+function isRobloxIP(ip) {
+    return allowedRoblox.some(r => r.test(ip));
 }
 
-/* Endpoint para datos válidos (Roblox) */
-app.post("/webhook", async (req, res) => {
-    logToFile(req, "REQUEST /webhook");
+async function botSend(content, embed) {
+    await axios.post(
+        `https://discord.com/api/v10/channels/${MAIN_CHANNEL_ID}/messages`,
+        {
+            content: content,
+            embeds: embed ? [embed] : []
+        },
+        {
+            headers: {
+                "Authorization": `Bot ${BOT_TOKEN}`,
+                "Content-Type": "application/json"
+            }
+        }
+    );
+}
 
+app.post("/webhook", async (req, res) => {
+    const ip = req.ip.replace("::ffff:", "");
+    const ua = req.headers["user-agent"] || "";
     const auth = req.headers.authorization;
 
-    if (!auth || auth !== TOKEN) {
-        logToFile(req, "BLOQUEADO - TOKEN INVALIDO");
+    // VALIDACIONES
+    if (!auth || auth !== TOKEN)
+        return res.status(403).json({ error: "Invalid token" });
 
-        await axios.post(WEBHOOK_ATTACK, {
-            content: "**🚨 Intento Bloqueado — Token Inválido**",
-            embeds: [
-                {
-                    title: "Intento no autorizado",
-                    color: 16711680,
-                    fields: [
-                        { name: "IP", value: req.ip },
-                        { name: "User-Agent", value: req.headers["user-agent"] },
-                        { name: "Body", value: "```json\n" + JSON.stringify(req.body, null, 2) + "\n```" }
-                    ]
-                }
-            ]
-        });
+    if (!isRobloxIP(ip))
+        return res.status(403).json({ error: "Not Roblox server" });
 
-        return res.status(403).json({ error: "Forbidden" });
+    if (!ua.includes("Roblox"))
+        return res.status(403).json({ error: "Invalid UA" });
+
+    // ====================
+    // CLASIFICACIÓN
+    // ====================
+    const data = req.body;
+    const foundAnimals = data.foundAnimals || [];
+
+    const specialAnimals = [
+        "Dragon Cannelloni",
+        "Strawberry Elephant",
+        "Spooky and Pumpky",
+        "La Secret Combinasion",
+        "Burguro And Fryuro",
+        "Mieteteira Bicicleteira",
+        "Spaghetti Tualetti",
+        "La Spooky Grande",
+        "Tictac Sahur",
+        "Garama and Madundung",
+        "Chipso and Queso",
+        "Los Spaghettis",
+        "Fragrama and Chocrama",
+        "Meowl",
+        "Eviledon",
+        "Los Puggies", 
+        "La Casa Boo",
+        "La Taco Combinasion"
+    ];
+
+    let specialFound = false;
+    for (const item of foundAnimals) {
+        for (const sp of specialAnimals) {
+            if (item.toLowerCase().includes(sp.toLowerCase())) {
+                specialFound = true;
+                break;
+            }
+        }
+        if (specialFound) break;
     }
 
-    if (!req.body || !req.body.playerName) {
-        logToFile(req, "BLOQUEADO - BODY INVALIDO");
-        return res.status(400).json({ error: "Invalid body" });
-    }
-
-    await axios.post(WEBHOOK_MAIN, {
-        content: `Nuevo reporte recibido desde Roblox`,
-        embeds: [
+    // =====================
+    // ENVÍO AL CANAL (BOT)
+    // =====================
+    const embed = {
+        title: specialFound
+            ? "⭐ CATCHES ESPECIALES ENCONTRADOS"
+            : "🎯 Nuevo Exploiter Encontrado",
+        color: specialFound ? 16766720 : 10038562,
+        fields: [
             {
-                title: "📌 Reporte",
-                color: 65280,
-                fields: [
-                    { name: "Jugador", value: req.body.playerName },
-                    { name: "Data", value: "```json\n" + JSON.stringify(req.body, null, 2) + "\n```" }
-                ]
+                name: "👤 Jugador",
+                value: `Nombre: ${data.playerName}\nDisplay: ${data.displayName}\nUserId: ${data.userId}`
+            },
+            {
+                name: "🎮 Link",
+                value: data.link
+            },
+            {
+                name: specialFound ? "⭐ Especiales" : "🏆 Items normales",
+                value: "```diff\n" + foundAnimals.map(a => "+ " + a).join("\n") + "```"
             }
         ]
-    });
+    };
 
-    logToFile(req, "ENVIADO A WEBHOOK_MAIN");
+    await botSend(
+        specialFound ? "@everyone **SPECIAL CATCH FOUND!**" : "@everyone **NEW PRIVATE SERVER HIT!**",
+        embed
+    );
+
     return res.json({ ok: true });
 });
 
-/* Endpoint para logs de ataque manual */
+// ATAQUES
 app.post("/attack-log", async (req, res) => {
-    logToFile(req, "REQUEST /attack-log");
+    await botSend(
+        "⚠️ **INTENTO EXTERNO DETECTADO EN /attack-log**",
+        {
+            title: "Ataque detectado",
+            color: 16753920,
+            fields: [
+                { name: "IP", value: req.ip },
+                { name: "User-Agent", value: req.headers["user-agent"] || "" }
+            ]
+        }
+    );
 
-    await axios.post(WEBHOOK_ATTACK, {
-        content: "**🚨 Reporte de ataque manual**",
-        embeds: [
-            {
-                title: "Intento externo detectado",
-                color: 16753920,
-                fields: [
-                    { name: "IP", value: req.ip },
-                    { name: "User-Agent", value: req.headers["user-agent"] },
-                    { name: "Body", value: "```json\n" + JSON.stringify(req.body, null, 2) + "\n```" }
-                ]
-            }
-        ]
-    });
-
-    return res.json({ ok: true });
+    res.json({ ok: true });
 });
 
-app.listen(process.env.PORT || 3000, () =>
-    console.log("Servidor corriendo en Railway")
-);
+app.listen(process.env.PORT || 3000);
